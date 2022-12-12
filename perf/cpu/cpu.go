@@ -19,11 +19,13 @@ package cpu
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"time"
 
 	sigar "github.com/cloudfoundry/gosigar"
+	"github.com/shirou/gopsutil/process"
 )
 
 const (
@@ -32,18 +34,19 @@ const (
 )
 
 type Usage struct {
-	Min float64
-	Max float64
-	Avg float64
-	P50 float64
-	P90 float64
-	P99 float64
+	Min   float64
+	Max   float64
+	Avg   float64
+	P50   float64
+	P90   float64
+	P99   float64
+	Total float64
 }
 
 func (u Usage) String() string {
 	return fmt.Sprintf(
-		"MIN: %0.2f%%, TP50: %0.2f%%, TP90: %0.2f%%, TP99: %0.2f%%, MAX: %0.2f%%, AVG:%0.2f%%",
-		u.Min, u.P50, u.P90, u.P99, u.Max, u.Avg,
+		"MIN: %0.2f%%, TP50: %0.2f%%, TP90: %0.2f%%, TP99: %0.2f%%, MAX: %0.2f%%, AVG:%0.2f%%, TOTAL:%fs",
+		u.Min, u.P50, u.P90, u.P99, u.Max, u.Avg, u.Total,
 	)
 }
 
@@ -58,7 +61,15 @@ func RecordUsageWithPid(ctx context.Context, pid int) (usage Usage, err error) {
 	if _, err = os.FindProcess(pid); err != nil {
 		return
 	}
-
+	proc, err := process.NewProcess(int32(pid))
+	if err != nil {
+		log.Fatal(err)
+	}
+	t, _ := proc.Times()
+	defer func() {
+		t1, _ := proc.Times()
+		usage.Total = t1.Total() - t.Total()
+	}()
 	var cpuUsageList []float64
 	var procCpu = sigar.ProcCpu{}
 	var ticker = time.NewTicker(defaultInterval)

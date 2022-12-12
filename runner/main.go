@@ -20,9 +20,14 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"runtime"
+	"runtime/pprof"
+	"runtime/trace"
 	"strconv"
 
 	"github.com/cloudwego/kitex-benchmark/perf"
+	"github.com/felixge/fgprof"
 )
 
 var (
@@ -51,7 +56,22 @@ type Response struct {
 	Msg    string
 }
 
+var (
+	memProfile   *string
+	cpuProfile   *string
+	blockProfile *string
+	mutexProfile *string
+	traceFile    *string
+	fgProfile    *string
+)
+
 func initFlags() {
+	fgProfile = flag.String("test.fgprofile", "", "write an fg profile to `file`")
+	memProfile = flag.String("test.memprofile", "", "write an allocation profile to `file`")
+	cpuProfile = flag.String("test.cpuprofile", "", "write a cpu profile to `file`")
+	blockProfile = flag.String("test.blockprofile", "", "write a goroutine blocking profile to `file`")
+	mutexProfile = flag.String("test.mutexprofile", "", "write a mutex contention profile to the named file after execution")
+	traceFile = flag.String("test.trace", "", "write an execution trace to `file`")
 	flag.StringVar(&address, "addr", "127.0.0.1:8000", "client call address")
 	flag.IntVar(&echoSize, "b", 1024, "echo size once")
 	flag.IntVar(&concurrent, "c", 100, "call concurrent")
@@ -63,6 +83,44 @@ func initFlags() {
 
 func Main(name string, newer ClientNewer) {
 	initFlags()
+
+	if *memProfile != "" {
+		f, _ := os.Create(*memProfile)
+		p := pprof.Lookup("heap")
+		defer p.WriteTo(f, 0)
+	}
+	if *cpuProfile != "" {
+		f, _ := os.Create(*cpuProfile)
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+	if *traceFile != "" {
+		f, _ := os.Create(*traceFile)
+		trace.Start(f)
+		defer trace.Stop()
+	}
+	if *blockProfile != "" {
+		f, _ := os.Create(*blockProfile)
+		runtime.SetBlockProfileRate(1)
+		p := pprof.Lookup("block")
+		defer p.WriteTo(f, 0)
+	}
+	if *mutexProfile != "" {
+		f, _ := os.Create(*mutexProfile)
+		runtime.SetMutexProfileFraction(1)
+		p := pprof.Lookup("mutex")
+		defer p.WriteTo(f, 0)
+	}
+	if *fgProfile != "" {
+		f, _ := os.Create(*fgProfile)
+		cancel := fgprof.Start(f, fgprof.FormatPprof)
+		defer func() {
+			err := cancel()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}()
+	}
 
 	// start pprof server
 	go func() {
